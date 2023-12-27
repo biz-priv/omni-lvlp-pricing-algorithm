@@ -1,0 +1,106 @@
+{
+  "167181440": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "REEFER",
+    "pick_city_state": "SOUTHBOROUGH, MA",
+    "del_city_state": "RIVIERA BEACH, FL",
+    "quoted_rate": 3116,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167166189": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "REEFER",
+    "pick_city_state": "SOUTHBOROUGH, MA",
+    "del_city_state": "KISSIMMEE, FL",
+    "quoted_rate": 3152,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "166740994": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "REEFER",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "PALMETTO, FL",
+    "quoted_rate": 1606,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167167246": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "VAN",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "LAS VEGAS, NV",
+    "quoted_rate": 3045,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167161478": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "VAN",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "OTTAWA, KS",
+    "quoted_rate": 1501,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167161720": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "VAN",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "ST JAMES, MO",
+    "quoted_rate": 1156,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167162083": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "VAN",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "BENTONVILLE, AR",
+    "quoted_rate": 1300,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167212429": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "REEFER",
+    "pick_city_state": "SOUTHBOROUGH, MA",
+    "del_city_state": "PORT ST LUCIE, FL",
+    "quoted_rate": 3024,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167206485": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "REEFER",
+    "pick_city_state": "SOUTHBOROUGH, MA",
+    "del_city_state": "PUNTA GORDA, FL",
+    "quoted_rate": 3108,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "166742281": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "REEFER",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "HOUSTON, TX",
+    "quoted_rate": 1342,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167222328": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "VAN",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "JACKSONVILLE, FL",
+    "quoted_rate": 865,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167212687": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "REEFER",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "SALISBURY, NC",
+    "quoted_rate": 1043,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  },
+  "167224092": {
+    "customer": "KENS FOODS INC.",
+    "equipment": "VAN",
+    "pick_city_state": "MCDONOUGH, GA",
+    "del_city_state": "LEBANON, IN",
+    "quoted_rate": 1043,
+    "timestamp": "2023-10-31T17:46:11+0000"
+  }
+}

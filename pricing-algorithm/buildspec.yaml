@@ -1,0 +1,68 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: latest
+    commands:
+    # Install all dependencies in formswebhook
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/formswebhook"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in webservice
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/webservice"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in blueyonder
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/blueyonder/blueyonderrequest"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in blueyonder
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/blueyonder/blueyonderquote"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in blueyonder
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/blueyonder/blueyonderresponse"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in S2Q
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/s2q"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in E2Open
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/basicauth"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in E2Open
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/newshipper"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in E2Open
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/rtr"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in E2Open
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/spot"
+    - pip install -r requirements.txt -t .
+    # Install all dependencies in libs
+    - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs"
+    - pip install -r requirements.txt -t .
+
+  pre_build:
+    commands:
+      # Copy common libraries into appropriate sub-deployable units
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/formswebhook"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/webservice"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/blueyonder/blueyonderrequest"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/blueyonder/blueyonderquote"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/webservice/generate_rates.py" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/blueyonder/blueyonderquote"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/blueyonder/blueyonderresponse"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/s2q"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/basicauth"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/newshipper"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/rtr"
+      - cp -R "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/libs" "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}/e2open/spot"
+
+  build:
+    commands:
+      - cd "${CODEBUILD_SRC_DIR}/${DEPLOYABLE_UNIT}"
+      - sam package --template-file "${DEPLOYABLE_UNIT}.yaml" --s3-bucket "${ARTIFACT_STORE}" --output-template-file packaged-template.yml
+
+artifacts:
+  discard-paths: yes
+  base-directory: "${DEPLOYABLE_UNIT}"
+  files:
+    - packaged-template.yml
+    - dev-config.json
+    - prod-config.json

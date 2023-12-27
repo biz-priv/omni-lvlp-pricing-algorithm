@@ -1,0 +1,12 @@
+certifi==2022.12.7
+charset-normalizer==3.0.1
+DateTime==5.0
+idna==3.4
+Jinja2==3.1.2
+pypostalcode==0.4.1
+pytz==2022.7.1
+pyzipcode==3.0.1
+requests==2.28.2
+urllib3==1.26.14
+zope.interface==5.5.2
+Jinja2==3.1.2

@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploys pre-requisite roles needed for cross-account CodePipline deployments
+
+Parameters:
+  Application:
+    Description: The application name
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+  Environment:
+    Description: The environment we are running in
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+  GitHubBranch:
+    Description: The code repository branch name
+    Type: String
+  TechnicalContact:
+    Description: Email address for technical contact, used in resource tags
+    Type: String
+    AllowedPattern: ([a-zA-Z0-9_\-\.]+)@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.)|(([a-zA-Z0-9\-]+\.)+))([a-zA-Z]{2,4}|[0-9]{1,3})(\]?)
+    ConstraintDescription: must be a valid email address.
+  ToolsAccount:
+    Description: AWS account number for Tools/Code Pipeline
+    Type: Number
+
+Resources:
+  CodePipelineCrossAccountRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-${GitHubBranch}-${Environment}-CodePipelineCrossAccountRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            AWS: !Ref ToolsAccount
+      Policies:
+        - PolicyName: AccessToCloudFormation
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: "*"
+        - PolicyName: AccessToS3
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:PutObject*
+                  - s3:ListBucket
+                Resource: "*"
+        - PolicyName: PassCloudFormationDeployerRolePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt CloudFormationDeployerRole.Arn
+        - PolicyName: CrossAccountKMSPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey*
+                  - kms:Encrypt
+                  - kms:ReEncrypt*
+                  - kms:Decrypt
+                Resource: "*"
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  CloudFormationDeployerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${Application}-${GitHubBranch}-${Environment}-CloudFormationDeployerRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service:
+                - cloudformation.amazonaws.com
+      Policies:
+        - PolicyName: CloudFormationDeployerPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  # Only specific IAM permissions needed (this is the main reason to limit control)
+                  - iam:CreateRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:DeleteRole
+                  - iam:CreatePolicy
+                  - iam:CreatePolicyVersion
+                  - iam:GetPolicy
+                  - iam:GetPolicyVersion
+                  - iam:DeletePolicy
+                  - iam:DeletePolicyVersion
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:PassRole
+                  - iam:CreateInstanceProfile
+                  - iam:GetInstanceProfile
+                  - iam:AddRoleToInstanceProfile
+                  - iam:RemoveRoleFromInstanceProfile
+                  - iam:DeleteInstanceProfile
+                  - iam:CreateServiceLinkedRole
+                  - iam:DeleteServiceLinkedRole
+                  - iam:GetServiceLinkedRoleDeletionStatus
+                  - iam:ListRoleTags
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:CreateUser
+                  - iam:PutUserPolicy
+                  - iam:ListAccessKeys
+                  - iam:CreateAccessKey
+                  - iam:DeleteUserPolicy
+                  - iam:DeleteUser
+                  - iam:GetUserPolicy
+                  - iam:ListUserTags
+                  - iam:TagUser
+                  - iam:UntagUser
+                  # For deployments and such
+                  - cloudformation:*
+                  # - codebuild:*
+                  # - codedeploy:*
+                  # Permissions needed to deploy the application
+                  - apigateway:*
+                  # - application-autoscaling:*
+                  - acm:*
+                  # - autoscaling:*
+                  - cloudfront:*
+                  - cloudwatch:*
+                  - dynamodb:*
+                  - ec2:*
+                  # - elasticfilesystem:*
+                  # - elasticloadbalancing:*
+                  - events:*
+                  # - es:*
+                  - firehose:*
+                  # - imagebuilder:*
+                  # - kinesis:*
+                  - lambda:*
+                  - logs:*
+                  # - rds:*
+                  - route53:*
+                  - s3:*
+                  # - ses:*
+                  - sns:*
+                  # - sqs:*
+                  - wafv2:*
+                  # - secretsmanager:*
+                  # - ssm:*
+                  - synthetics:*
+                Resource: "*"
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact

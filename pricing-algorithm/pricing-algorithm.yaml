@@ -1,0 +1,3845 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: Pricing Algorithm serverless application
+
+Parameters:
+  Application:
+    Description: The application name
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+  Environment:
+    Description: The environment we are running in
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+  DeployableUnitName:
+    Description: The deployable unit name
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+  GitHubBranch:
+    Description: GitHub repo branch name
+    Type: String
+    AllowedPattern: "[A-Za-z0-9-]+"
+  TechnicalContact:
+    Description: Email address for technical contact, used in resource tags
+    Type: String
+    AllowedPattern: ([a-zA-Z0-9_\-\.]+)@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.)|(([a-zA-Z0-9\-]+\.)+))([a-zA-Z]{2,4}|[0-9]{1,3})(\]?)
+    ConstraintDescription: must be a valid email address.
+  NotifyOnEvents:
+    Description: Comma separated list of email addresses to notify on major events
+    Type: String
+  Route53UpdaterRole:
+    Description: The cross-account role ARN that allows Route53 updates
+    Type: String
+  NotifyOnPricingAlgoEvents:
+    Description: Comma separated list of email addresses to notify on major eAdaptor events
+    Type: String
+  ApiGatewayName:
+    Description: The name of the API Gateway we are creating
+    Type: String
+  FormsApiGatewayResourcePath:
+    Description: The name of the API Gateway resource we are creating for formswebhook
+    Type: String
+  PricingApiGatewayResourcePath:
+    Description: The name of the API Gateway resource we are creating for the pricing algo
+    Type: String
+  BlueYonderApiGatewayResourcePath:
+    Description: The name of the API Gateway resource we are creating for Blue Yonder
+    Type: String
+  E2OpenRootResourcePath:
+    Description: The name of the API Gateway root resource we are creating for E2Open
+    Type: String
+  E2OpenRTRResourcePath:
+    Description: The name of the API Gateway resource we are creating for E2Open rtr
+    Type: String
+  E2OpenNewShipperResourcePath:
+    Description: The name of the API Gateway resource we are creating for E2Open new shipper
+    Type: String
+  E2OpenSpotResourcePath:
+    Description: The name of the API Gateway resource we are creating for E2Open spot quoting
+    Type: String
+  S2QApiGatewayResourcePath:
+    Description: The name of the API Gateway resource we are creating for S2Q
+    Type: String
+  ApiGatewayStageName:
+    Description: The name of the API Gateway Stage we are creating
+    Type: String
+  ApiGatewayVersion:
+    Description: The version of the API Gateway Stage we are creating
+    Type: String
+  LogFullApiData:
+    Description:  Log full requests/responses data for Api Gateway
+    Type: String
+    AllowedValues: [ true, false ]
+
+Conditions:
+  EnvironmentIsDev: !Equals [!Ref Environment, dev]
+  EnvironmentIsProd: !Equals [!Ref Environment, prod]
+
+Resources:
+  ################################################################################
+  # Secure passwords and keys for transfers
+  ################################################################################
+
+  PricingAlgoGreenscreensPassword:
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider
+
+  PricingAlgoDATPassword:
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider
+
+  PricingAlgoGoogleAPIPassword:
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider
+
+  PricingAlgoBlueYonderToken:
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider
+
+  PricingAlgoFuelAPIPassword:
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider
+
+  PricingAlgoE2OpenBasicAuthPassword:
+    Type: Custom::Secret
+    Properties:
+      Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/e2open-secrets
+      KeyAlias: alias/aws/ssm
+      ServiceToken: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:binxio-cfn-secret-provider
+
+  ################################################################################
+  # Resources for CloudWatch alarms & dashboards
+  ################################################################################
+
+  PricingAlgoNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  PricingAlgoNotificationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref PricingAlgoNotificationTopic
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowS3Events
+            Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref PricingAlgoNotificationTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:S3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                      Operation: Lower
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
+            Principal:
+              AWS: "*"
+          - Sid: AllowAlarmEvents
+            Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref PricingAlgoNotificationTopic
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*
+            Principal:
+              AWS: "*"
+
+  SubscribeContactsPricingAlgoTopic:
+    Type: Custom::SubscribeToTopicCustomResource
+    Properties:
+      ServiceToken: !ImportValue SubscribeToTopicResourceArn
+      TopicArn: !Ref PricingAlgoNotificationTopic
+      Endpoints: !Split [",", !Ref NotifyOnPricingAlgoEvents]
+      Protocol: email
+
+  BlockedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm if we receive too many blocked requests in the WAF (e.g. someone is trying to hack us)
+      ComparisonOperator: GreaterThanUpperThreshold
+      EvaluationPeriods: 1
+      Metrics:
+        - Id: m1
+          Label: Blocked Requests
+          ReturnData: true
+          MetricStat:
+            Metric:
+              Namespace: AWS/WAFV2
+              MetricName: BlockedRequests
+              Dimensions:
+                - Name: WebACL
+                  Value: !GetAtt PricingAlgoWAFName.Name
+                - Name: Region
+                  Value: !Ref AWS::Region
+                - Name: Rule
+                  Value: ALL
+            Stat: Sum
+            Period: 60
+        - Id: ad1
+          Label: Blocked Requests (expected)
+          ReturnData: true
+          Expression: ANOMALY_DETECTION_BAND(m1, 2)
+      ThresholdMetricId: ad1
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref PricingAlgoNotificationTopic
+
+  ################################################################################
+  # Serverless Pricing Algorithm Web Service resources
+  ################################################################################
+
+  WebServiceExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt WebServiceLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt PricingAlgoDynamoDBTable.Arn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  WebServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-WebService
+      RetentionInDays: 7
+
+  WebServiceLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: WebServiceLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-WebService
+      Description: WorldTrak Pricing Algorithm
+      Handler: index.lambda_handler
+      Role: !GetAtt WebServiceExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: webservice/
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_DB_TABLE: !Ref PricingAlgoDynamoDBTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+          FUEL_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  WebServicePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt WebServiceLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${PricingApiGatewayResourcePath}"
+
+  ################################################################################
+  # Serverless Forms Webhook resources
+  ################################################################################
+
+  FormsWebhookExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt FormsWebhookLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt PricingAlgoDynamoDBTable.Arn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  FormsWebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-FormsWebhook
+      RetentionInDays: 7
+
+  FormsWebhookLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: FormsWebhookLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-FormsWebhook
+      Description: Formstack Webhook Pricing Algorithm
+      Handler: index.lambda_handler
+      Role: !GetAtt FormsWebhookExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: formswebhook/
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_DB_TABLE: !Ref PricingAlgoDynamoDBTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+          FUEL_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  FormsWebhookPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt FormsWebhookLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${FormsApiGatewayResourcePath}"
+
+  ################################################################################
+  # Serverless Blue Yonder resources
+  ################################################################################
+
+  BlueYonderRequestExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt BlueYonderRequestLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt PricingAlgoDynamoDBTable.Arn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  BlueYonderRequestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-BlueYonderRequest
+      RetentionInDays: 7
+
+  BlueYonderRequestLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: BlueYonderRequestLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-BlueYonderRequest
+      Description: Response to Blue Yonder request for quote
+      Handler: index.lambda_handler
+      Role: !GetAtt BlueYonderRequestExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: blueyonder/blueyonderrequest/
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_DB_TABLE: !Ref PricingAlgoDynamoDBTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+          FUEL_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+                Operation: Lower
+          BLUE_YONDER_SECRETS:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  BlueYonderRequestPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt BlueYonderRequestLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${BlueYonderApiGatewayResourcePath}"
+
+  BlueYonderQuoteExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt BlueYonderQuoteLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: 
+                - !GetAtt PricingAlgoDynamoDBTable.Arn
+                - !GetAtt PricingAlgoDynamoDBTable.StreamArn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  BlueYonderQuoteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-BlueYonderQuote
+      RetentionInDays: 7
+
+  BlueYonderQuoteLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: BlueYonderQuoteLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-BlueYonderQuote
+      Description: Blue Yonder Pricing Algorithm
+      Handler: index.lambda_handler
+      Role: !GetAtt BlueYonderQuoteExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: blueyonder/blueyonderquote/
+      Events:
+        DDBEvent:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt PricingAlgoDynamoDBTable.StreamArn
+            MaximumRetryAttempts: 0
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 1
+            Enabled: True
+            FilterCriteria:
+              Filters:
+                - Pattern: '{ "dynamodb" : { "NewImage" : { "NewQuote" : { "S" : ["Yes"] } } } }'
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_DB_TABLE: !Ref PricingAlgoDynamoDBTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+          FUEL_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+                Operation: Lower
+          BLUE_YONDER_SECRETS:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  BlueYonderResponseExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt BlueYonderResponseLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+        - PolicyName: ssm-put-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:PutParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: 
+                - !GetAtt PricingAlgoDynamoDBTable.Arn
+                - !GetAtt PricingAlgoDynamoDBTable.StreamArn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  BlueYonderResponseLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-BlueYonderResponse
+      RetentionInDays: 7
+
+  BlueYonderResponseLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: BlueYonderResponseLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-BlueYonderResponse
+      Description: Sending response to Blue Yonder with pricing quote
+      Handler: index.lambda_handler
+      Role: !GetAtt BlueYonderResponseExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: blueyonder/blueyonderresponse/
+      ReservedConcurrentExecutions: 1 # Limiting to 1. Can only create Blue Yonder Auth token every 2 hours.
+      Events:
+        DDBEvent:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt PricingAlgoDynamoDBTable.StreamArn
+            MaximumRetryAttempts: 0
+            StartingPosition: TRIM_HORIZON
+            BatchSize: 1
+            Enabled: True
+            FilterCriteria:
+              Filters:
+                - Pattern: '{ "dynamodb" : { "NewImage" : { "NewQuote" : { "S" : ["No"] } } } }'
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_DB_TABLE: !Ref PricingAlgoDynamoDBTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+          FUEL_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+                Operation: Lower
+          BLUE_YONDER_SECRETS:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  ################################################################################
+  # Serverless E2Open resources for Basic Auth
+  ################################################################################
+
+  E2OpenBasicAuthExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/e2open-secrets
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt E2OpenBasicAuthLogGroup.Arn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment1
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  E2OpenBasicAuthLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-E2OpenBasicAuth
+      RetentionInDays: 7
+
+  AuthLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt E2OpenBasicAuthLambda.Arn
+      Principal: apigateway.amazonaws.com
+
+  E2OpenBasicAuthLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: E2OpenBasicAuthLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-E2OpenBasicAuth
+      Description: E2Open Basic Auth Function
+      Handler: index.lambda_handler
+      Role: !GetAtt E2OpenBasicAuthExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: e2open/basicauth
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          E2OPEN_SECRETS:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/e2open-secrets
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  LambdaAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      AuthorizerResultTtlInSeconds: 300
+      IdentitySource: method.request.header.Authorization
+      Name: basicAuthorizer
+      RestApiId: !Ref PricingAlgoApiGateway
+      Type: 'TOKEN'
+      AuthorizerUri: 
+        Fn::Sub: arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${E2OpenBasicAuthLambda.Arn}/invocations
+
+  E2OpenBasicAuthHealthPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref E2OpenBasicAuthLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt E2OpenBasicAuthHealthSchedule.Arn
+
+  E2OpenBasicAuthHealthSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Scheduled Rule
+      ScheduleExpression: "rate(1 minute)"
+      State: DISABLED
+      Targets:
+        - Id: !Sub ${AWS::StackName}-E2OpenHealthCheckAuth
+          Arn: !GetAtt E2OpenBasicAuthLambda.Arn
+          Input: '{ "lambda_warmer": "/health" }'
+
+  ################################################################################
+  # Serverless E2Open resources for RTR
+  ################################################################################
+
+  E2OpenRequestExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt E2OpenRequestLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: 
+                - !GetAtt PricingAlgoE2OpenTable.Arn
+                - !GetAtt PricingAlgoE2OpenTable.StreamArn
+                - !GetAtt PricingAlgoE2OpenNewShipperTable.Arn
+                - !GetAtt PricingAlgoE2OpenNewShipperTable.StreamArn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  E2OpenRequestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-E2OpenRequest
+      RetentionInDays: 7
+
+  E2OpenRequestLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: E2OpenRequestLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-E2OpenRequest
+      Description: E2Open quote request
+      Handler: index.lambda_handler
+      Role: !GetAtt E2OpenRequestExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: e2open/rtr
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_E2OPEN_TABLE: !Ref PricingAlgoE2OpenTable
+          E2OPEN_NEW_SHIPPER_TABLE: !Ref PricingAlgoE2OpenNewShipperTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  E2OpenRequestPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt E2OpenRequestLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${E2OpenRootResourcePath}"
+
+  E2OpenHealthCheckPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref E2OpenRequestLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt E2OpenHealthCheckSchedule.Arn
+
+  E2OpenHealthCheckSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Scheduled Rule
+      ScheduleExpression: "rate(1 minute)"
+      State: DISABLED
+      Targets:
+        - Id: !Sub ${AWS::StackName}-E2OpenHealthCheck
+          Arn: !GetAtt E2OpenRequestLambda.Arn
+          Input: '{ "lambda_warmer": "/health" }'
+
+  ################################################################################
+  # Serverless E2Open resources for New Shipper
+  ################################################################################
+
+  E2OpenNewShipperExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt E2OpenNewShipperLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: 
+                - !GetAtt PricingAlgoE2OpenTable.Arn
+                - !GetAtt PricingAlgoE2OpenTable.StreamArn
+                - !GetAtt PricingAlgoE2OpenNewShipperTable.Arn
+                - !GetAtt PricingAlgoE2OpenNewShipperTable.StreamArn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  E2OpenNewShipperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-E2OpenNewShipper
+      RetentionInDays: 7
+
+  E2OpenNewShipperLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: E2OpenNewShipperLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-E2OpenNewShipper
+      Description: E2Open New Shipper Request
+      Handler: index.lambda_handler
+      Role: !GetAtt E2OpenNewShipperExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: e2open/newshipper
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_E2OPEN_TABLE: !Ref PricingAlgoE2OpenTable       
+          E2OPEN_NEW_SHIPPER_TABLE: !Ref PricingAlgoE2OpenNewShipperTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  E2OpenNewShipperPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt E2OpenNewShipperLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${E2OpenRootResourcePath}/${E2OpenRTRResourcePath}/${E2OpenNewShipperResourcePath}"
+
+  ################################################################################
+  # Serverless E2Open resources for Spot Quoting
+  ################################################################################
+
+  E2OpenSpotExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt E2OpenSpotLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: 
+                - !GetAtt PricingAlgoE2OpenTable.Arn
+                - !GetAtt PricingAlgoE2OpenTable.StreamArn
+                - !GetAtt PricingAlgoE2OpenNewShipperTable.Arn
+                - !GetAtt PricingAlgoE2OpenNewShipperTable.StreamArn
+                - !GetAtt PricingAlgoE2OpenSpotTable.Arn
+                - !GetAtt PricingAlgoE2OpenSpotTable.StreamArn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  E2OpenSpotLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-E2OpenSpot
+      RetentionInDays: 7
+
+  E2OpenSpotLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: E2OpenSpotLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-E2OpenSpot
+      Description: E2Open Spot Request
+      Handler: index.lambda_handler
+      Role: !GetAtt E2OpenSpotExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: e2open/spot
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          PRICING_ALGO_E2OPEN_TABLE: !Ref PricingAlgoE2OpenTable       
+          E2OPEN_NEW_SHIPPER_TABLE: !Ref PricingAlgoE2OpenNewShipperTable
+          E2OPEN_SPOT_TABLE: !Ref PricingAlgoE2OpenSpotTable
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  E2OpenSpotSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Scheduled Rule
+      ScheduleExpression: "rate(5 minutes)"
+      State: DISABLED
+      Targets:
+        - Id: !Sub ${AWS::StackName}-E2OpenSpot
+          Arn: !GetAtt E2OpenSpotLambda.Arn
+
+  E2OpenSpotEventsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref E2OpenSpotLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt E2OpenSpotSchedule.Arn
+
+  E2OpenSpotGateWayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt E2OpenSpotLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${E2OpenSpotResourcePath}"
+
+  ################################################################################
+  # Serverless S2Q resources
+  ################################################################################
+
+  S2QRequestExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt S2QRequestLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  S2QRequestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-S2QRequest
+      RetentionInDays: 7
+
+  S2QRequestLambda:
+    Type: AWS::Serverless::Function
+    DependsOn: S2QRequestLogGroup
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-S2QRequest
+      Description: S2Q quote request
+      Handler: index.lambda_handler
+      Role: !GetAtt S2QRequestExecutionRole.Arn
+      Timeout: 60
+      Runtime: python3.9
+      CodeUri: s2q
+      Environment:
+        Variables:
+          APPLICATION: !Ref Application
+          ENVIRONMENT: !Ref Environment
+          IMMUTABLE_ARCHIVE:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+                Operation: Lower
+          GREENSCREENS_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                Operation: Lower
+          DAT_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                Operation: Lower
+          GOOGLE_API_SECRET:
+            Fn::Transform:
+              Name: String
+              Parameters:
+                InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                Operation: Lower
+      Tags:
+        Application: !Ref Application
+        Environment: !Ref Environment
+        DeployableUnitName: !Ref DeployableUnitName
+        GitHubBranch: !Ref GitHubBranch
+        TechnicalContact: !Ref TechnicalContact
+
+  S2QRequestPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt S2QRequestLambda.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${S2QApiGatewayResourcePath}"
+
+  ################################################################################
+  # Common API Gateway resources
+  ################################################################################
+
+  PricingAlgoApiGatewayLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: apigateway.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:DescribeLogGroups
+                - logs:DescribeLogStreams
+                - logs:PutLogEvents
+                - logs:GetLogEvents
+                - logs:FilterLogEvents
+              Resource: "*"
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  PricingAlgoApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub API-Gateway-Execution-Logs_${PricingAlgoApiGateway}/${Environment}
+      RetentionInDays: 7
+
+  PricingAlgoApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Description: Pricing Algorithm API Gateway
+      Name: !Sub ${Application}-${DeployableUnitName}-${GitHubBranch}-${ApiGatewayName}-${ApiGatewayVersion}
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  PricingAlgoApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    DependsOn: PricingAlgoApiGatewayLogGroup
+    Properties:
+      DeploymentId: !Ref PricingAlgoApiGatewayDeployment
+      RestApiId: !Ref PricingAlgoApiGateway
+      StageName: !Ref ApiGatewayStageName
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          MetricsEnabled: true
+          DataTraceEnabled: !Ref LogFullApiData
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  PricingAlgoApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: WebServiceApiGatewayPOST
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  PricingAlgoFormsApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    DependsOn: PricingAlgoApiGateway
+    Properties:
+      CloudWatchRoleArn: !GetAtt PricingAlgoApiGatewayLogsRole.Arn
+
+  PricingAlgoApiGatewayMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Properties:
+      DomainName: !Ref ApiGatewayDomainName
+      RestApiId: !Ref PricingAlgoApiGateway
+      Stage: !Ref PricingAlgoApiGatewayStage
+
+  PricingAlgoApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+      Enabled: true
+
+  PricingAlgoUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+        - ApiId: !Ref PricingAlgoApiGateway
+          Stage: !Ref PricingAlgoApiGatewayStage
+      Quota:
+        Limit: 10000
+        Offset: 0
+        Period: DAY
+      Throttle:
+        BurstLimit: 200
+        RateLimit: 1000
+
+  PricingAlgoUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref PricingAlgoApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref PricingAlgoUsagePlan
+
+  ################################################################################
+  # API Gateway resources for Pricing Algorithm Web Service
+  ################################################################################
+
+  WebServiceApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !GetAtt PricingAlgoApiGateway.RootResourceId
+      PathPart: !Ref PricingApiGatewayResourcePath
+
+  WebServiceApiGatewayPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 400
+            SelectionPattern: .*Validation Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 403
+            SelectionPattern: .*403.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("403: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 409
+            SelectionPattern: .*409.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("409: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 500
+            SelectionPattern: .*Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebServiceArn}/invocations
+          - WebServiceArn: !GetAtt WebServiceLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 403
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 409
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 400
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 500
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+      ResourceId: !Ref WebServiceApiResource
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  ################################################################################
+  # API Gateway resources for Forms Webhook
+  ################################################################################
+
+  FormsWebhookApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !GetAtt PricingAlgoApiGateway.RootResourceId
+      PathPart: !Ref FormsApiGatewayResourcePath
+
+  FormsWebhookApiGatewayPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: POST
+      Integration:
+        RequestTemplates:
+          application/json: |
+            {
+              "data": $input.json('$')
+            }
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 400
+            SelectionPattern: .*Validation Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 403
+            SelectionPattern: .*403.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("403: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 409
+            SelectionPattern: .*409.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("409: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 500
+            SelectionPattern: .*Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FormsWebhookArn}/invocations
+          - FormsWebhookArn: !GetAtt FormsWebhookLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 400
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 403
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 409
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 500
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+      ResourceId: !Ref FormsWebhookApiResource
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  ################################################################################
+  # API Gateway resources for Blue Yonder
+  ################################################################################
+
+  BlueYonderApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !GetAtt PricingAlgoApiGateway.RootResourceId
+      PathPart: !Ref BlueYonderApiGatewayResourcePath
+
+  BlueYonderApiGatewayPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      HttpMethod: POST
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 400
+            SelectionPattern: .*Validation Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 403
+            SelectionPattern: .*403.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("403: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 409
+            SelectionPattern: .*409.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("409: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 500
+            SelectionPattern: .*Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BlueYonderArn}/invocations
+          - BlueYonderArn: !GetAtt BlueYonderRequestLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 400
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 403
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 409
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 500
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+      ResourceId: !Ref BlueYonderApiResource
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  ################################################################################
+  # API Gateway resources for E2Open RTR
+  ################################################################################
+
+  E2OpenRootApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !GetAtt PricingAlgoApiGateway.RootResourceId
+      PathPart: !Ref E2OpenRootResourcePath
+
+  E2OpenApiGatewayPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+      HttpMethod: POST
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 204
+            SelectionPattern: .*204.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("204: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 400
+            SelectionPattern: .*Validation Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 403
+            SelectionPattern: .*403.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("403: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 409
+            SelectionPattern: .*409.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("409: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 500
+            SelectionPattern: .*Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${E2OpenArn}/invocations
+          - E2OpenArn: !GetAtt E2OpenRequestLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 204
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 400
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 403
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 409
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 500
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+      ResourceId: !Ref E2OpenRootApiResource
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  ################################################################################
+  # API Gateway resources for E2Open New Shipper
+  ################################################################################
+
+  E2OpenRTRApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !Ref E2OpenRootApiResource
+      PathPart: !Ref E2OpenRTRResourcePath
+
+  E2OpenNewShipperApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !Ref E2OpenRTRApiResource
+      PathPart: !Ref E2OpenNewShipperResourcePath
+
+  E2OpenNewShipperApiGatewayPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+      HttpMethod: POST
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 204
+            SelectionPattern: .*204.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("204: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 400
+            SelectionPattern: .*Validation Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 403
+            SelectionPattern: .*403.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("403: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 409
+            SelectionPattern: .*409.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("409: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 500
+            SelectionPattern: .*Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${E2OpenNewShipperArn}/invocations
+          - E2OpenNewShipperArn: !GetAtt E2OpenNewShipperLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 204
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 400
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 403
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 409
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 500
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+      ResourceId: !Ref E2OpenNewShipperApiResource
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  ################################################################################
+  # API Gateway resources for E2Open Spot Quoting
+  ################################################################################
+
+  E2OpenSpotApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !GetAtt PricingAlgoApiGateway.RootResourceId
+      PathPart: !Ref E2OpenSpotResourcePath
+
+  E2OpenSpotApiGatewayPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref LambdaAuthorizer
+      HttpMethod: POST
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 204
+            SelectionPattern: .*204.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("204: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 400
+            SelectionPattern: .*Validation Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 403
+            SelectionPattern: .*403.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("403: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 409
+            SelectionPattern: .*409.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("409: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 500
+            SelectionPattern: .*Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${E2OpenSpotArn}/invocations
+          - E2OpenSpotArn: !GetAtt E2OpenSpotLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 204
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 400
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 403
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 409
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 500
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+      ResourceId: !Ref E2OpenSpotApiResource
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  ################################################################################
+  # API Gateway resources for S2Q
+  ################################################################################
+
+  S2QApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref PricingAlgoApiGateway
+      ParentId: !GetAtt PricingAlgoApiGateway.RootResourceId
+      PathPart: !Ref S2QApiGatewayResourcePath
+
+  S2QApiGatewayPOST:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      HttpMethod: POST
+      Integration:
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot 
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 400
+            SelectionPattern: .*Validation Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 403
+            SelectionPattern: .*403.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("403: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 409
+            SelectionPattern: .*409.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                #set($errorMessage = $inputRoot.errorMessage.replaceAll("409: ", ""))
+                $errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+          - StatusCode: 500
+            SelectionPattern: .*Error.*
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                $inputRoot.errorMessage
+            ResponseParameters:
+              method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubDomains'"
+              method.response.header.X-Content-Type-Options: "'nosniff'"
+              method.response.header.X-Frame-Options: "'SAMEORIGIN'"
+              method.response.header.X-XSS-Protection: "'1; mode=block'"
+              method.response.header.Cache-Control: "'max-age=0, no-cache, no-store, must-revalidate'"
+              method.response.header.Pragma: "'no-cache'"
+              method.response.header.Expires: "'Wed, 12 Jan 1980 05:00:00 GMT'"
+              method.response.header.Permissions-Policy: "'geolocation=(),midi=(),sync-xhr=(),microphone=(),camera=(),magnetometer=(),gyroscope=(),fullscreen=(self),payment=()'"
+              method.response.header.X-Permitted-Cross-Domain-Policies: "'none'"
+              method.response.header.Referrer-Policy: "'same-origin'"
+              method.response.header.Expect-CT: "'max-age=43200'"
+        IntegrationHttpMethod: POST
+        Type: AWS
+        Uri: !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${S2QArn}/invocations
+          - S2QArn: !GetAtt S2QRequestLambda.Arn
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 400
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 403
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 409
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+        - StatusCode: 500
+          ResponseModels:
+            application/json: "Empty"
+          ResponseParameters:
+            method.response.header.Strict-Transport-Security: true
+            method.response.header.X-Content-Type-Options: true
+            method.response.header.X-Frame-Options: true
+            method.response.header.X-XSS-Protection: true
+            method.response.header.Cache-Control: true
+            method.response.header.Pragma: true
+            method.response.header.Expires: true
+            method.response.header.Permissions-Policy: true
+            method.response.header.X-Permitted-Cross-Domain-Policies: true
+            method.response.header.Referrer-Policy: true
+            method.response.header.Expect-CT: true
+      ResourceId: !Ref S2QApiResource
+      RestApiId: !Ref PricingAlgoApiGateway
+
+  ################################################################################
+  # WAF resources
+  ################################################################################
+
+  PricingAlgoWAFLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  CleanupPricingAlgoWAFLogBucketOnDeletion:
+    Type: Custom::S3CustomResource
+    Properties:
+      ServiceToken: !ImportValue CleanupS3BucketResourceArn
+      S3_Bucket: !Ref PricingAlgoWAFLogBucket
+
+  PricingAlgoWAFLogStreamLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+
+  PricingAlgoWAFLogStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DependsOn: PricingAlgoWAFLogStreamFirehoseDeliveryPolicy
+    Properties:
+      # WAF logging requirements - must have aws-waf-logs- prefix -- https://docs.aws.amazon.com/waf/latest/developerguide/logging.html#logging-management
+      DeliveryStreamName: !Sub aws-waf-logs-${Application}-${Environment}-${DeployableUnitName}
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !GetAtt PricingAlgoWAFLogBucket.Arn
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 50
+        CloudWatchLoggingOptions:
+          Enabled: true
+          LogGroupName: !Ref PricingAlgoWAFLogStreamLogGroup
+          LogStreamName: PricingAlgoWAFLogStream
+        ErrorOutputPrefix: errors/
+        CompressionFormat: UNCOMPRESSED
+        Prefix: firehose/
+        RoleARN: !GetAtt PricingAlgoWAFLogStreamDeliveryRole.Arn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  PricingAlgoWAFLogStreamDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref AWS::AccountId
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  PricingAlgoWAFLogStreamCWLPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: cwl-access
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !GetAtt PricingAlgoWAFLogStream.Arn
+      Roles:
+        - !Ref PricingAlgoWAFLogStreamDeliveryRole
+
+  PricingAlgoWAFLogStreamFirehoseDeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: firehose_delivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:AbortMultipartUpload
+              - s3:GetBucketLocation
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:ListBucketMultipartUploads
+              - s3:PutObject
+            Resource:
+              - !Sub ${PricingAlgoWAFLogBucket.Arn}
+              - !Sub ${PricingAlgoWAFLogBucket.Arn}/*
+      Roles:
+        - !Ref PricingAlgoWAFLogStreamDeliveryRole
+
+  # There is no CloudFormation WebACL param to enable logging, just do this manually for now
+  PricingAlgoeWAF:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: MetricForWebACL
+      Rules:
+        - Name: AWS-AWSManagedRulesAmazonIpReputationList
+          Priority: 0
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForIpReputation
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAmazonIpReputationList
+        - Name: AWS-AWSManagedRulesAnonymousIpList
+          Priority: 1
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForAnonymousIp
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAnonymousIpList
+              ExcludedRules:
+                - Name: HostingProviderIPList
+        - Name: AWS-AWSManagedRulesCommonRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForCommonRuleSet
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              # CargoWise was triggering these rules when talking to the eAdaptor, they need to be excluded
+              ExcludedRules:
+                - Name: NoUserAgent_HEADER
+                - Name: GenericRFI_BODY
+                - Name: CrossSiteScripting_BODY
+                - Name: SizeRestrictions_BODY
+        - Name: AWS-AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 3
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForKnownBadInputs
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+        - Name: AWS-AWSManagedRulesUnixRuleSet
+          Priority: 4
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForUnix
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesUnixRuleSet
+        - Name: AWS-AWSManagedRulesLinuxRuleSet
+          Priority: 5
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForLinux
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesLinuxRuleSet
+        - Name: AWS-AWSManagedRulesWindowsRuleSet
+          Priority: 6
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForWindows
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesWindowsRuleSet
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  PricingAlgoWAFAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      WebACLArn: !GetAtt PricingAlgoeWAF.Arn
+      ResourceArn: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${PricingAlgoApiGateway}/stages/${PricingAlgoApiGatewayStage}
+
+  PricingAlgoWAFName:
+    Type: Custom::S3CustomResource
+    DependsOn: GetWebACLNameLogGroup
+    Properties:
+      ServiceToken: !GetAtt GetWebACLName.Arn
+      WebACL: !Ref PricingAlgoeWAF
+
+  DNSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 7
+
+  DNSLogGroupPolicy:
+    Type: Custom::AddResourcePolicy
+    Properties:
+      ServiceToken: !ImportValue UpdateCWLPolicyResourceArn
+      CloudWatchLogsLogGroupArn: !GetAtt DNSLogGroup.Arn
+      PolicyName: dns-log-group-policy
+
+  DNSZone:
+    Type: AWS::Route53::HostedZone
+    DependsOn: DNSLogGroupPolicy
+    Properties:
+      Name: !If [ EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com" ]
+      HostedZoneConfig:
+        Comment: !Sub Delegated sub-domain for ${Application} in ${Environment}
+      QueryLoggingConfig:
+        CloudWatchLogsLogGroupArn: !GetAtt DNSLogGroup.Arn
+      HostedZoneTags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  CleanupDNSZoneOnDeletion:
+    Type: Custom::CleanupDNSZone
+    Properties:
+      ServiceToken: !ImportValue CleanupRoute53ZoneResourceArn
+      HostedZoneId: !Ref DNSZone
+
+  SubDomainDelegation:
+    Type: Custom::Route53CustomResource
+    Properties:
+      ServiceToken: !ImportValue UpdateRoute53ResourceArn
+      Route53UpdaterRole: !Ref Route53UpdaterRole
+      HostedZoneName: omnilogistics.com.
+      Name: !If [ EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com" ]
+      Type: NS
+      ResourceRecords: !GetAtt DNSZone.NameServers
+      TTL: 300
+
+  ApiGatewayDNS:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref DNSZone
+      Name: !If [ EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com" ]
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt ApiGatewayDomainName.DistributionHostedZoneId
+        DNSName: !GetAtt ApiGatewayDomainName.DistributionDomainName
+        EvaluateTargetHealth: true
+
+  ApiGatewayDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+      CertificateArn: !Ref ApiGatewayCertificate
+      DomainName: !If [ EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com" ]
+      SecurityPolicy: TLS_1_2
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  ApiGatewayCertificate:
+    Type: AWS::CertificateManager::Certificate
+    DependsOn: SubDomainDelegation
+    Properties:
+      DomainName: !If [ EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com" ]
+      DomainValidationOptions:
+        - DomainName: !If [ EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com" ]
+          HostedZoneId: !Ref DNSZone
+      ValidationMethod: DNS
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
+
+  ################################################################################
+  # Custom resource to return WebACL WAF Name
+  ################################################################################
+
+  GetWebACLNameExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt GetWebACLNameLogGroup.Arn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: TechnicalContact
+          Value: !Ref TechnicalContact
+
+  GetWebACLNameLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-GetWebACLName
+      RetentionInDays: 7
+
+  GetWebACLName:
+    DependsOn: GetWebACLNameLogGroup
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-GetWebACLName
+      Description: CloudFormation custom resource to return WebACL WAF Name
+      Handler: index.handler
+      Role: !GetAtt GetWebACLNameExecutionRole.Arn
+      Timeout: 360
+      Runtime: python3.7
+      Code:
+        ZipFile: |
+          import cfnresponse
+          def handler(event, context):
+              response_data = {}
+              try:
+                  webacldetails = event['ResourceProperties']['WebACL'].split("|")
+                  response_data['Name'] = webacldetails[0]
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+              except Exception as e:
+                  response_data['Data'] = str(e)
+                  cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: TechnicalContact
+          Value: !Ref TechnicalContact
+
+  ################################################################################
+  # Resources for DynamoDB tables
+  ################################################################################
+
+  PricingAlgoDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: message_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: message_id
+          KeyType: HASH
+
+  PricingAlgoE2OpenTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: message_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: message_id
+          KeyType: HASH
+
+  PricingAlgoE2OpenNewShipperTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: message_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: message_id
+          KeyType: HASH
+
+  PricingAlgoE2OpenSpotTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: message_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: message_id
+          KeyType: HASH

@@ -1,0 +1,19 @@
+{
+  "Parameters": {
+    "Environment": "prod",
+    "Route53UpdaterRole": "arn:aws:iam::332281781429:role/Cross-Account-Route53-CreateRoute53EntryRole-1MUPAJMHJP7LX",
+    "NotifyOnPricingAlgoEvents": "twashburn@omnilogistics.com,tgilbertson@omnilogistics.com",
+    "ApiGatewayName": "pricing-algo-gateway",
+    "ApiGatewayStageName": "prod",
+    "FormsApiGatewayResourcePath": "forms",
+    "PricingApiGatewayResourcePath": "webservice",
+    "BlueYonderApiGatewayResourcePath": "blueyonder",
+    "E2OpenRootResourcePath": "e2open",
+    "E2OpenRTRResourcePath": "rtr",
+    "E2OpenNewShipperResourcePath": "new-shipper",
+    "E2OpenSpotResourcePath": "spot",
+    "S2QApiGatewayResourcePath": "s2q_rate_request",
+    "ApiGatewayVersion": "1.0.0",
+    "LogFullApiData": "true"
+  }
+}
