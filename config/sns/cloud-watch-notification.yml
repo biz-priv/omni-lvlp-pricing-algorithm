@@ -1,0 +1,56 @@
+PricingAlgoNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
+
+PricingAlgoNotificationTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+        Topics:
+            - !Ref PricingAlgoNotificationTopic
+        PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+                - Sid: AllowS3Events
+                  Effect: Allow
+                  Action: sns:Publish
+                  Resource: !Ref PricingAlgoNotificationTopic
+                  Condition:
+                      ArnLike:
+                          aws:SourceArn:
+                              Fn::Transform:
+                                  Name: String
+                                  Parameters:
+                                      InputString: !Sub arn:${AWS::Partition}:S3:::${self:service}-${self:provider.stage}-${self:service}-PricingAlgoArchive
+                                      Operation: Lower
+                      StringEquals:
+                          aws:SourceAccount: !Sub ${AWS::AccountId}
+                  Principal:
+                      AWS: "*"
+                - Sid: AllowAlarmEvents
+                  Effect: Allow
+                  Action: sns:Publish
+                  Resource: !Ref PricingAlgoNotificationTopic
+                  Condition:
+                      ArnLike:
+                          aws:SourceArn: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:*
+                  Principal:
+                      AWS: "*"
+
+SubscribeContactsPricingAlgoTopic:
+    Type: Custom::SubscribeToTopicCustomResource
+    Properties:
+        ServiceToken: !ImportValue SubscribeToTopicResourceArn
+        TopicArn: !Ref PricingAlgoNotificationTopic
+        Endpoints: !Split [",", !Ref NotifyOnPricingAlgoEvents]
+        Protocol: email

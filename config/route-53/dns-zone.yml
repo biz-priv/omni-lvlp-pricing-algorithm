@@ -1,0 +1,87 @@
+DNSZone:
+    Type: AWS::Route53::HostedZone
+    DependsOn: DNSLogGroupPolicy
+    Properties:
+        Name: !If [EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com"]
+        HostedZoneConfig:
+            Comment: !Sub Delegated sub-domain for ${Application} in ${Environment}
+        QueryLoggingConfig:
+            CloudWatchLogsLogGroupArn: !GetAtt DNSLogGroup.Arn
+        HostedZoneTags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
+
+CleanupDNSZoneOnDeletion:
+    Type: Custom::CleanupDNSZone
+    Properties:
+        ServiceToken: !ImportValue CleanupRoute53ZoneResourceArn
+        HostedZoneId: !Ref DNSZone
+
+SubDomainDelegation:
+    Type: Custom::Route53CustomResource
+    Properties:
+        ServiceToken: !ImportValue UpdateRoute53ResourceArn
+        Route53UpdaterRole: !Ref Route53UpdaterRole
+        HostedZoneName: omnilogistics.com.
+        Name: !If [EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com"]
+        Type: NS
+        ResourceRecords: !GetAtt DNSZone.NameServers
+        TTL: 300
+
+ApiGatewayDNS:
+    Type: AWS::Route53::RecordSet
+    Properties:
+        HostedZoneId: !Ref DNSZone
+        Name: !If [EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com"]
+        Type: A
+        AliasTarget:
+            HostedZoneId: !GetAtt ApiGatewayDomainName.DistributionHostedZoneId
+            DNSName: !GetAtt ApiGatewayDomainName.DistributionDomainName
+            EvaluateTargetHealth: true
+
+ApiGatewayDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+        CertificateArn: !Ref ApiGatewayCertificate
+        DomainName: !If [EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com"]
+        SecurityPolicy: TLS_1_2
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
+
+ApiGatewayCertificate:
+    Type: AWS::CertificateManager::Certificate
+    DependsOn: SubDomainDelegation
+    Properties:
+        DomainName: !If [EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com"]
+        DomainValidationOptions:
+            - DomainName: !If [EnvironmentIsProd, !Sub "${Application}.omnilogistics.com", !Sub "${Environment}-${Application}.omnilogistics.com"]
+              HostedZoneId: !Ref DNSZone
+        ValidationMethod: DNS
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}

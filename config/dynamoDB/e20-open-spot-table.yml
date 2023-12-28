@@ -1,0 +1,12 @@
+PricingAlgoE2OpenSpotTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+        StreamSpecification:
+            StreamViewType: NEW_AND_OLD_IMAGES
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+            - AttributeName: message_id
+              AttributeType: S
+        KeySchema:
+            - AttributeName: message_id
+              KeyType: HASH

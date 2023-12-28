@@ -1,0 +1,5 @@
+PricingAlgoApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+        LogGroupName: !Sub API-Gateway-Execution-Logs_${PricingAlgoApiGateway}/${Environment}
+        RetentionInDays: 7

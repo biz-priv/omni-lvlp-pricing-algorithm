@@ -1,0 +1,20 @@
+PricingAlgoWAFLogBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
+
+CleanupPricingAlgoWAFLogBucketOnDeletion:
+    Type: Custom::S3CustomResource
+    Properties:
+        ServiceToken: !ImportValue CleanupS3BucketResourceArn
+        S3_Bucket: !Ref PricingAlgoWAFLogBucket

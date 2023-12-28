@@ -1,0 +1,79 @@
+service: pricing-algorithm
+
+provider:
+    name: aws
+    runtime: python3.9
+    region: ${opt:region, "us-east-1"}
+    stage: ${opt:stage, "dev"}
+    stackTags:
+        Application: Pricing Algorithm serverless application
+        CreateBy: BizCloudExperts
+        Environment: ${self:provider.stage}
+
+functions:
+    ################################################################################
+    # Custom resource to return WebACL WAF Name
+    ################################################################################
+    GetWebACLName: ${file(config/functions/get-web-acl-name.yml):GetWebACLName}
+
+resources:
+    Resources:
+        ################################################################################
+        # Resources for CloudWatch alarms & dashboards
+        ################################################################################
+        PricingAlgoNotificationTopic: ${file(config/sns/cloud-watch-notification.yml):PricingAlgoNotificationTopic}
+        PricingAlgoNotificationTopicPolicy: ${file(config/sns/cloud-watch-notification.yml):PricingAlgoNotificationTopicPolicy}
+        SubscribeContactsPricingAlgoTopic: ${file(config/sns/cloud-watch-notification.yml):SubscribeContactsPricingAlgoTopic}
+
+        BlockedRequestsAlarm: ${file(config/cloud-watch/blocked-request-alarm.yml):BlockedRequestsAlarm}
+
+        ################################################################################
+        # Custom resource to return WebACL WAF Name
+        ################################################################################
+        GetWebACLNameExecutionRole: ${file(config/iam/web-acl-name-execution-role.yml):GetWebACLNameExecutionRole}
+        GetWebACLNameLogGroup: ${file(config/cloud-watch/web-acl-name-log-group.yml):GetWebACLNameLogGroup}
+
+        ################################################################################
+        # Resources for DynamoDB tables
+        ################################################################################
+        PricingAlgoDynamoDBTable: ${file(config/dynamoDB/master-table.yml):PricingAlgoDynamoDBTable}
+        PricingAlgoE2OpenTable: ${file(config/dynamoDB/e20-open-table.yml):PricingAlgoE2OpenTable}
+        PricingAlgoE2OpenNewShipperTable: ${file(config/dynamoDB/e20-open-new-shipper-table.yml):PricingAlgoE2OpenNewShipperTable}
+        PricingAlgoE2OpenSpotTable: ${file(config/dynamoDB/e20-open-spot-table.yml):PricingAlgoE2OpenSpotTable}
+
+        ################################################################################
+        # Common API Gateway resources
+        ################################################################################
+        PricingAlgoApiGatewayLogsRole: ${file(config/iam/api-gateway-logs-role.yml):PricingAlgoApiGatewayLogsRole}
+        PricingAlgoApiGatewayLogGroup: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoApiGatewayLogGroup}
+        PricingAlgoApiGateway: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoApiGateway}
+        PricingAlgoApiGatewayStage: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoApiGatewayStage}
+        PricingAlgoApiGatewayDeployment: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoApiGatewayDeployment}
+        PricingAlgoFormsApiGatewayAccount: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoFormsApiGatewayAccount}
+        PricingAlgoApiGatewayMapping: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoApiGatewayMapping}
+        PricingAlgoApiKey: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoApiKey}
+        PricingAlgoUsagePlan: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoUsagePlan}
+        PricingAlgoUsagePlanKey: ${file(config/api-gateway/common-api-gateway.yml):PricingAlgoUsagePlanKey}
+
+        ################################################################################
+        # WAF resources
+        ################################################################################
+        PricingAlgoWAFLogBucket: ${file(config/s3/waf-log-bucket.yml):PricingAlgoWAFLogBucket}
+        CleanupPricingAlgoWAFLogBucketOnDeletion: ${file(config/s3/waf-log-bucket.yml):CleanupPricingAlgoWAFLogBucketOnDeletion}
+        PricingAlgoWAFLogStreamLogGroup: ${file(config/cloud-watch/waf-log-stream-log-group.yml):PricingAlgoWAFLogStreamLogGroup}
+        PricingAlgoWAFLogStream: ${file(config/firehose/waf-log-stream-firehose.yml):PricingAlgoWAFLogStream}
+        PricingAlgoWAFLogStreamDeliveryRole: ${file(config/iam/waf-log-stream-delivery-role.yml):PricingAlgoWAFLogStreamDeliveryRole}
+        PricingAlgoWAFLogStreamCWLPolicy: ${file(config/iam/waf-log-stream-cwl-policy.yml):PricingAlgoWAFLogStreamCWLPolicy}
+        PricingAlgoWAFLogStreamFirehoseDeliveryPolicy: ${file(config/iam/waf-log-stream-firehose-delivery-policy.yml):PricingAlgoWAFLogStreamFirehoseDeliveryPolicy}
+        # There is no CloudFormation WebACL param to enable logging, just do this manually for now
+        PricingAlgoeWAF: ${file(config/waf/pricing-algo-waf.yml):PricingAlgoeWAF}
+        PricingAlgoWAFAssociation: ${file(config/waf/pricing-algo-waf.yml):PricingAlgoWAFAssociation}
+        PricingAlgoWAFName: ${file(config/waf/pricing-algo-waf.yml):PricingAlgoWAFName}
+        DNSLogGroup: ${file(config/route-53/dns-zone.yml):DNSLogGroup}
+        DNSLogGroupPolicy: ${file(config/route-53/dns-zone.yml):DNSLogGroupPolicy}
+        DNSZone: ${file(config/route-53/dns-zone.yml):DNSZone}
+        CleanupDNSZoneOnDeletion: ${file(config/route-53/dns-zone.yml):CleanupDNSZoneOnDeletion}
+        SubDomainDelegation: ${file(config/route-53/dns-zone.yml):SubDomainDelegation}
+        ApiGatewayDNS: ${file(config/route-53/dns-zone.yml):ApiGatewayDNS}
+        ApiGatewayDomainName: ${file(config/route-53/dns-zone.yml):ApiGatewayDomainName}
+        ApiGatewayCertificate: ${file(config/route-53/dns-zone.yml):ApiGatewayCertificate}

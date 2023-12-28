@@ -1,0 +1,33 @@
+GetWebACLName:
+    DependsOn: GetWebACLNameLogGroup
+    Type: AWS::Lambda::Function
+    Properties:
+        FunctionName: !Sub ${AWS::StackName}-GetWebACLName
+        Description: CloudFormation custom resource to return WebACL WAF Name
+        Handler: index.handler
+        Role: !GetAtt GetWebACLNameExecutionRole.Arn
+        Timeout: 360
+        Runtime: python3.7
+        Code:
+            ZipFile: |
+                import cfnresponse
+                def handler(event, context):
+                    response_data = {}
+                    try:
+                        webacldetails = event['ResourceProperties']['WebACL'].split("|")
+                        response_data['Name'] = webacldetails[0]
+                        cfnresponse.send(event, context, cfnresponse.SUCCESS, response_data)
+                    except Exception as e:
+                        response_data['Data'] = str(e)
+                        cfnresponse.send(event, context, cfnresponse.FAILED, response_data)
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}

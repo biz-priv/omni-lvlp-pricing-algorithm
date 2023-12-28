@@ -1,0 +1,20 @@
+PricingAlgoWAFLogStreamFirehoseDeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+        PolicyName: firehose_delivery_policy
+        PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+                - Effect: Allow
+                  Action:
+                      - s3:AbortMultipartUpload
+                      - s3:GetBucketLocation
+                      - s3:GetObject
+                      - s3:ListBucket
+                      - s3:ListBucketMultipartUploads
+                      - s3:PutObject
+                  Resource:
+                      - !Sub ${PricingAlgoWAFLogBucket.Arn}
+                      - !Sub ${PricingAlgoWAFLogBucket.Arn}/*
+        Roles:
+            - !Ref PricingAlgoWAFLogStreamDeliveryRole

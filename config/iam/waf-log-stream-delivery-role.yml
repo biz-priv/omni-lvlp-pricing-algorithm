@@ -1,0 +1,24 @@
+PricingAlgoWAFLogStreamDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+        AssumeRolePolicyDocument:
+            Version: 2012-10-17
+            Statement:
+                - Effect: Allow
+                  Principal:
+                      Service: firehose.amazonaws.com
+                  Action: sts:AssumeRole
+                  Condition:
+                      StringEquals:
+                          sts:ExternalId: !Ref AWS::AccountId
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}

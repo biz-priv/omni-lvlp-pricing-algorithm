@@ -1,0 +1,128 @@
+# There is no CloudFormation WebACL param to enable logging, just do this manually for now
+PricingAlgoeWAF:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+        Scope: REGIONAL
+        DefaultAction:
+            Allow: {}
+        VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: MetricForWebACL
+        Rules:
+            - Name: AWS-AWSManagedRulesAmazonIpReputationList
+              Priority: 0
+              OverrideAction:
+                  None: {}
+              VisibilityConfig:
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: MetricForIpReputation
+              Statement:
+                  ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesAmazonIpReputationList
+            - Name: AWS-AWSManagedRulesAnonymousIpList
+              Priority: 1
+              OverrideAction:
+                  None: {}
+              VisibilityConfig:
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: MetricForAnonymousIp
+              Statement:
+                  ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesAnonymousIpList
+                      ExcludedRules:
+                          - Name: HostingProviderIPList
+            - Name: AWS-AWSManagedRulesCommonRuleSet
+              Priority: 2
+              OverrideAction:
+                  None: {}
+              VisibilityConfig:
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: MetricForCommonRuleSet
+              Statement:
+                  ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesCommonRuleSet
+                      # CargoWise was triggering these rules when talking to the eAdaptor, they need to be excluded
+                      ExcludedRules:
+                          - Name: NoUserAgent_HEADER
+                          - Name: GenericRFI_BODY
+                          - Name: CrossSiteScripting_BODY
+                          - Name: SizeRestrictions_BODY
+            - Name: AWS-AWSManagedRulesKnownBadInputsRuleSet
+              Priority: 3
+              OverrideAction:
+                  None: {}
+              VisibilityConfig:
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: MetricForKnownBadInputs
+              Statement:
+                  ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesKnownBadInputsRuleSet
+            - Name: AWS-AWSManagedRulesUnixRuleSet
+              Priority: 4
+              OverrideAction:
+                  None: {}
+              VisibilityConfig:
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: MetricForUnix
+              Statement:
+                  ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesUnixRuleSet
+            - Name: AWS-AWSManagedRulesLinuxRuleSet
+              Priority: 5
+              OverrideAction:
+                  None: {}
+              VisibilityConfig:
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: MetricForLinux
+              Statement:
+                  ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesLinuxRuleSet
+            - Name: AWS-AWSManagedRulesWindowsRuleSet
+              Priority: 6
+              OverrideAction:
+                  None: {}
+              VisibilityConfig:
+                  SampledRequestsEnabled: true
+                  CloudWatchMetricsEnabled: true
+                  MetricName: MetricForWindows
+              Statement:
+                  ManagedRuleGroupStatement:
+                      VendorName: AWS
+                      Name: AWSManagedRulesWindowsRuleSet
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
+
+PricingAlgoWAFAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+        WebACLArn: !GetAtt PricingAlgoeWAF.Arn
+        ResourceArn: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${PricingAlgoApiGateway}/stages/${PricingAlgoApiGatewayStage}
+
+PricingAlgoWAFName:
+    Type: Custom::S3CustomResource
+    DependsOn: GetWebACLNameLogGroup
+    Properties:
+        ServiceToken: !GetAtt GetWebACLName.Arn
+        WebACL: !Ref PricingAlgoeWAF

@@ -1,0 +1,89 @@
+PricingAlgoApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+        Description: Pricing Algorithm API Gateway
+        Name: !Sub ${Application}-${DeployableUnitName}-${GitHubBranch}-${ApiGatewayName}-${ApiGatewayVersion}
+        EndpointConfiguration:
+            Types:
+                - REGIONAL
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
+
+PricingAlgoApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    DependsOn: PricingAlgoApiGatewayLogGroup
+    Properties:
+        DeploymentId: !Ref PricingAlgoApiGatewayDeployment
+        RestApiId: !Ref PricingAlgoApiGateway
+        StageName: ${self:provider.stage}
+        MethodSettings:
+            - ResourcePath: "/*"
+              HttpMethod: "*"
+              LoggingLevel: INFO
+              MetricsEnabled: true
+              DataTraceEnabled: ${opt:LogFullApiData}
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
+
+PricingAlgoApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: WebServiceApiGatewayPOST
+    Properties:
+        RestApiId: !Ref PricingAlgoApiGateway
+
+PricingAlgoFormsApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    DependsOn: PricingAlgoApiGateway
+    Properties:
+        CloudWatchRoleArn: !GetAtt PricingAlgoApiGatewayLogsRole.Arn
+
+PricingAlgoApiGatewayMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Properties:
+        DomainName: !Ref ApiGatewayDomainName
+        RestApiId: !Ref PricingAlgoApiGateway
+        Stage: !Ref PricingAlgoApiGatewayStage
+
+PricingAlgoApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    Properties:
+        Enabled: true
+
+PricingAlgoUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+        ApiStages:
+            - ApiId: !Ref PricingAlgoApiGateway
+              Stage: !Ref PricingAlgoApiGatewayStage
+        Quota:
+            Limit: 10000
+            Offset: 0
+            Period: DAY
+        Throttle:
+            BurstLimit: 200
+            RateLimit: 1000
+
+PricingAlgoUsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+        KeyId: !Ref PricingAlgoApiKey
+        KeyType: API_KEY
+        UsagePlanId: !Ref PricingAlgoUsagePlan

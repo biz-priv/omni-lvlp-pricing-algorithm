@@ -1,0 +1,30 @@
+PricingAlgoWAFLogStream:
+    Type: AWS::KinesisFirehose::DeliveryStream
+    DependsOn: PricingAlgoWAFLogStreamFirehoseDeliveryPolicy
+    Properties:
+        # WAF logging requirements - must have aws-waf-logs- prefix -- https://docs.aws.amazon.com/waf/latest/developerguide/logging.html#logging-management
+        DeliveryStreamName: !Sub aws-waf-logs-${Application}-${Environment}-${DeployableUnitName}
+        ExtendedS3DestinationConfiguration:
+            BucketARN: !GetAtt PricingAlgoWAFLogBucket.Arn
+            BufferingHints:
+                IntervalInSeconds: 60
+                SizeInMBs: 50
+            CloudWatchLoggingOptions:
+                Enabled: true
+                LogGroupName: !Ref PricingAlgoWAFLogStreamLogGroup
+                LogStreamName: PricingAlgoWAFLogStream
+            ErrorOutputPrefix: errors/
+            CompressionFormat: UNCOMPRESSED
+            Prefix: firehose/
+            RoleARN: !GetAtt PricingAlgoWAFLogStreamDeliveryRole.Arn
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}

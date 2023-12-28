@@ -1,0 +1,31 @@
+BlockedRequestsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+        AlarmDescription: Alarm if we receive too many blocked requests in the WAF (e.g. someone is trying to hack us)
+        ComparisonOperator: GreaterThanUpperThreshold
+        EvaluationPeriods: 1
+        Metrics:
+            - Id: m1
+              Label: Blocked Requests
+              ReturnData: true
+              MetricStat:
+                  Metric:
+                      Namespace: AWS/WAFV2
+                      MetricName: BlockedRequests
+                      Dimensions:
+                          - Name: WebACL
+                            Value: !GetAtt PricingAlgoWAFName.Name
+                          - Name: Region
+                            Value: ${self:provider.region}
+                          - Name: Rule
+                            Value: ALL
+                  Stat: Sum
+                  Period: 60
+            - Id: ad1
+              Label: Blocked Requests (expected)
+              ReturnData: true
+              Expression: ANOMALY_DETECTION_BAND(m1, 2)
+        ThresholdMetricId: ad1
+        TreatMissingData: notBreaching
+        AlarmActions:
+            - !Ref PricingAlgoNotificationTopic

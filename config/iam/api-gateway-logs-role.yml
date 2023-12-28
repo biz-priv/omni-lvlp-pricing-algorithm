@@ -1,0 +1,37 @@
+PricingAlgoApiGatewayLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+        AssumeRolePolicyDocument:
+            Version: 2012-10-17
+            Statement:
+                Effect: Allow
+                Action: sts:AssumeRole
+                Principal:
+                    Service: apigateway.amazonaws.com
+        Path: /
+        Policies:
+            - PolicyName: cwl-access
+              PolicyDocument:
+                  Version: 2012-10-17
+                  Statement:
+                      Effect: Allow
+                      Action:
+                          - logs:CreateLogGroup
+                          - logs:CreateLogStream
+                          - logs:DescribeLogGroups
+                          - logs:DescribeLogStreams
+                          - logs:PutLogEvents
+                          - logs:GetLogEvents
+                          - logs:FilterLogEvents
+                      Resource: "*"
+        Tags:
+            - Key: Application
+              Value: ${self:service}
+            - Key: DeployableUnitName
+              Value: ${self:service}
+            - Key: GitHubBranch
+              Value: ${opt:GitHubBranch, 'default-branch'}
+            - Key: Environment
+              Value: ${self:provider.stage}
+            - Key: Technical Contact
+              Value: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}

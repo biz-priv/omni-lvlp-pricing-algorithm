@@ -1,0 +1,11 @@
+DNSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+        RetentionInDays: 7
+
+DNSLogGroupPolicy:
+    Type: Custom::AddResourcePolicy
+    Properties:
+        ServiceToken: !ImportValue UpdateCWLPolicyResourceArn
+        CloudWatchLogsLogGroupArn: !GetAtt DNSLogGroup.Arn
+        PolicyName: dns-log-group-policy
