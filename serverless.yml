@@ -16,6 +16,11 @@ functions:
     ################################################################################
     GetWebACLName: ${file(config/functions/get-web-acl-name.yml):GetWebACLName}
 
+    ################################################################################
+    # Serverless Pricing Algorithm Web Service resources
+    ################################################################################
+    WebServiceLambda: ${file(config/functions/web-service.yml):WebServiceLambda}
+
 resources:
     Resources:
         ################################################################################
@@ -77,3 +82,13 @@ resources:
         ApiGatewayDNS: ${file(config/route-53/dns-zone.yml):ApiGatewayDNS}
         ApiGatewayDomainName: ${file(config/route-53/dns-zone.yml):ApiGatewayDomainName}
         ApiGatewayCertificate: ${file(config/route-53/dns-zone.yml):ApiGatewayCertificate}
+
+        ################################################################################
+        # Serverless Pricing Algorithm Web Service resources
+        ################################################################################
+        WebServiceExecutionRole: ${file(config/iam/web-service-execution-role.yml):WebServiceExecutionRole}
+
+        ################################################################################
+        # Serverless Forms Webhook resources
+        ################################################################################
+        FormsWebhookExecutionRole: ${file(config/iam/webhook-execution-role.yml):FormsWebhookExecutionRole}

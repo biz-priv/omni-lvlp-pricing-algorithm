@@ -1,0 +1,27 @@
+WebServiceLambda:
+    name: ${self:service}-WebService-${self:provider.stage}
+    description: WorldTrak Pricing Algorithm
+    handler: pricing-algorithm/webservice/index.lambda_handler
+    role: WebServiceExecutionRole
+    timeout: 60
+    events:
+    - http:
+          path: webservice
+          method: POST
+          integration: lambda
+          cors: true
+    environment:
+        APPLICATION: ${self:service}
+        ENVIRONMENT: ${self:provider.stage}
+        PRICING_ALGO_DB_TABLE: !Ref PricingAlgoDynamoDBTable
+        IMMUTABLE_ARCHIVE: ${self:service}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+        GREENSCREENS_SECRET: /app/${self:service}/${Environment}/${DeployableUnitName}/greenscreens-secret
+        DAT_SECRET: /app/${self:service}/${Environment}/${DeployableUnitName}/dat-secret
+        GOOGLE_API_SECRET: /app/${self:service}/${Environment}/${DeployableUnitName}/google-api-secret
+        FUEL_API_SECRET: /app/${self:service}/${Environment}/${DeployableUnitName}/fuel-api-secret
+    tags:
+        Application: ${self:service}
+        DeployableUnitName: ${self:service}
+        GitHubBranch: ${opt:GitHubBranch, 'default-branch'}
+        Environment: ${self:provider.stage}
+        Technical Contact: ${opt:TechnicalContact, "tgilbertson@omnilogistics.com"}
