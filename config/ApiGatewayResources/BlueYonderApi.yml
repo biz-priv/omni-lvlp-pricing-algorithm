@@ -1,0 +1,99 @@
+
+BlueYonderApiResource:
+  Type: AWS::ApiGateway::Resource
+  Properties:
+    RestApiId:  PricingAlgoApiGateway
+    ParentId: PricingAlgoApiGateway.RootResourceId
+    PathPart: ${self:custom.apiPath}  # Set your desired API path here
+
+BlueYonderApiGatewayPOST:
+  Type: AWS::ApiGateway::Method
+  Properties:
+    AuthorizationType: NONE
+    ApiKeyRequired: true
+    HttpMethod: POST
+    Integration:
+      IntegrationHttpMethod: POST
+      Type: AWS
+      Uri: !Sub
+        - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${BlueYonderArn}/invocations
+        - BlueYonderArn: !GetAtt BlueYonderRequestLambda.Arn
+    MethodResponses:
+      - StatusCode: 200
+        ResponseModels:
+          application/json: "Empty"
+        ResponseParameters:
+          method.response.header.Strict-Transport-Security: true
+          method.response.header.X-Content-Type-Options: true
+          method.response.header.X-Frame-Options: true
+          method.response.header.X-XSS-Protection: true
+          method.response.header.Cache-Control: true
+          method.response.header.Pragma: true
+          method.response.header.Expires: true
+          method.response.header.Permissions-Policy: true
+          method.response.header.X-Permitted-Cross-Domain-Policies: true
+          method.response.header.Referrer-Policy: true
+          method.response.header.Expect-CT: true
+      - StatusCode: 400
+        ResponseModels:
+          application/json: "Empty"
+        ResponseParameters:
+          method.response.header.Strict-Transport-Security: true
+          method.response.header.X-Content-Type-Options: true
+          method.response.header.X-Frame-Options: true
+          method.response.header.X-XSS-Protection: true
+          method.response.header.Cache-Control: true
+          method.response.header.Pragma: true
+          method.response.header.Expires: true
+          method.response.header.Permissions-Policy: true
+          method.response.header.X-Permitted-Cross-Domain-Policies: true
+          method.response.header.Referrer-Policy: true
+          method.response.header.Expect-CT: true
+      - StatusCode: 403
+        ResponseModels:
+          application/json: "Empty"
+        ResponseParameters:
+          method.response.header.Strict-Transport-Security: true
+          method.response.header.X-Content-Type-Options: true
+          method.response.header.X-Frame-Options: true
+          method.response.header.X-XSS-Protection: true
+          method.response.header.Cache-Control: true
+          method.response.header.Pragma: true
+          method.response.header.Expires: true
+          method.response.header.Permissions-Policy: true
+          method.response.header.X-Permitted-Cross-Domain-Policies: true
+          method.response.header.Referrer-Policy: true
+          method.response.header.Expect-CT: true
+      - StatusCode: 409
+        ResponseModels:
+          application/json: "Empty"
+        ResponseParameters:
+          method.response.header.Strict-Transport-Security: true
+          method.response.header.X-Content-Type-Options: true
+          method.response.header.X-Frame-Options: true
+          method.response.header.X-XSS-Protection: true
+          method.response.header.Cache-Control: true
+          method.response.header.Pragma: true
+          method.response.header.Expires: true
+          method.response.header.Permissions-Policy: true
+          method.response.header.X-Permitted-Cross-Domain-Policies: true
+          method.response.header.Referrer-Policy: true
+          method.response.header.Expect-CT: true
+      - StatusCode: 500
+        ResponseModels:
+          application/json: "Empty"
+        ResponseParameters:
+          method.response.header.Strict-Transport-Security: true
+          method.response.header.X-Content-Type-Options: true
+          method.response.header.X-Frame-Options: true
+          method.response.header.X-XSS-Protection: true
+          method.response.header.Cache-Control: true
+          method.response.header.Pragma: true
+          method.response.header.Expires: true
+          method.response.header.Permissions-Policy: true
+          method.response.header.X-Permitted-Cross-Domain-Policies: true
+          method.response.header.Referrer-Policy: true
+          method.response.header.Expect-CT: true
+    ResourceId: !Ref BlueYonderApiResource
+    RestApiId: !Ref ApiGatewayRestApi
+

@@ -1,0 +1,29 @@
+E2OpenBasicAuthLambda:
+  Type: AWS::Serverless::Function
+  DependsOn: E2OpenBasicAuthLogGroup
+  Properties:
+    FunctionName: !Sub ${AWS::StackName}-E2OpenBasicAuth
+    Description: E2Open Basic Auth Function
+    Handler: index.lambda_handler
+    Role: !GetAtt E2OpenBasicAuthExecutionRole.Arn
+    Timeout: 60
+    memorySize: 500
+    Runtime: python3.9
+    CodeUri: e2open/basicauth
+    Environment:
+      Variables:
+        APPLICATION: !Ref Application
+        ENVIRONMENT: !Ref Environment
+        E2OPEN_SECRETS:
+          Fn::Transform:
+            Name: String
+            Parameters:
+              InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/e2open-secrets
+              Operation: Lower
+    Tags:
+      Application: !Ref Application
+      Environment: !Ref Environment
+      DeployableUnitName: !Ref DeployableUnitName
+      GitHubBranch: !Ref GitHubBranch
+      TechnicalContact: !Ref TechnicalContact
+

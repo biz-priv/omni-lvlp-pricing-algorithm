@@ -1,0 +1,74 @@
+E2OpenRequestLambda:
+  Type: AWS::Serverless::Function
+  DependsOn: E2OpenRequestLogGroup
+  Properties:
+    FunctionName: !Sub ${AWS::StackName}-E2OpenRequest
+    Description: E2Open quote request
+    Handler: index.lambda_handler
+    Role: !GetAtt E2OpenRequestExecutionRole.Arn
+    Timeout: 60
+    Runtime: python3.9
+    CodeUri: e2open/rtr
+    Environment:
+      Variables:
+        APPLICATION: !Ref Application
+        ENVIRONMENT: !Ref Environment
+        PRICING_ALGO_E2OPEN_TABLE: !Ref PricingAlgoE2OpenTable
+        E2OPEN_NEW_SHIPPER_TABLE: !Ref PricingAlgoE2OpenNewShipperTable
+        IMMUTABLE_ARCHIVE:
+          Fn::Transform:
+            Name: String
+            Parameters:
+              InputString: !Sub ${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive
+              Operation: Lower
+        GREENSCREENS_SECRET:
+          Fn::Transform:
+            Name: String
+            Parameters:
+              InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+              Operation: Lower
+        DAT_SECRET:
+          Fn::Transform:
+            Name: String
+            Parameters:
+              InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+              Operation: Lower
+        GOOGLE_API_SECRET:
+          Fn::Transform:
+            Name: String
+            Parameters:
+              InputString: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+              Operation: Lower
+    Tags:
+      Application: !Ref Application
+      Environment: !Ref Environment
+      DeployableUnitName: !Ref DeployableUnitName
+      GitHubBranch: !Ref GitHubBranch
+      TechnicalContact: !Ref TechnicalContact
+
+E2OpenRequestPermission:
+  Type: AWS::Lambda::Permission
+  Properties:
+    Action: lambda:InvokeFunction
+    FunctionName: !GetAtt E2OpenRequestLambda.Arn
+    Principal: apigateway.amazonaws.com
+    SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PricingAlgoApiGateway}/*/POST/${E2OpenRootResourcePath}"
+
+E2OpenHealthCheckPermission:
+  Type: AWS::Lambda::Permission
+  Properties:
+    FunctionName: !Ref E2OpenRequestLambda
+    Action: lambda:InvokeFunction
+    Principal: events.amazonaws.com
+    SourceArn: !GetAtt E2OpenHealthCheckSchedule.Arn
+
+E2OpenHealthCheckSchedule:
+  Type: AWS::Events::Rule
+  Properties:
+    Description: Scheduled Rule
+    ScheduleExpression: "rate(1 minute)"
+    State: DISABLED
+    Targets:
+      - Id: !Sub ${AWS::StackName}-E2OpenHealthCheck
+        Arn: !GetAtt E2OpenRequestLambda.Arn
+        Input: '{ "lambda_warmer": "/health" }'

@@ -1,0 +1,15 @@
+GetWebACLName:
+  name: ${self:service}-GetWebACLName-${self:provider.stage}
+  description: CloudFormation custom resource to return WebACL WAF Name
+  handler: pricing-algorithm/webacl/index.handler
+  role: GetWebACLNameExecutionRole
+  timeout: 360
+  runtime: python3.7
+  memorySize: 500
+
+  tags:
+    Application: ${self:custom.application}
+    Environment: ${self:provider.stage}
+    DeployableUnitName: ${self:service}
+    GitHubBranch: ${self:custom.GitHubBranch}
+    TechnicalContact: ${self:custom.TechnicalContact}

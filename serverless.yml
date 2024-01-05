@@ -1,5 +1,15 @@
 service: pricing-algorithm
 
+custom:
+    application: pricing-algo
+    GitHubBranch: master
+    TechnicalContact: tgilbertson@omnilogistics.com
+    BlueYonderApiGatewayResourcePath: "blueyonder"
+    redshift_host: <host>
+    redshift_port : <port>
+    redshift_database: <name>
+    redshift_username: <username>
+    redshift_password: <password>
 provider:
     name: aws
     runtime: python3.9
@@ -9,6 +19,7 @@ provider:
         Application: Pricing Algorithm serverless application
         CreateBy: BizCloudExperts
         Environment: ${self:provider.stage}
+
 
 functions:
     ################################################################################
@@ -20,9 +31,53 @@ functions:
     # Serverless Pricing Algorithm Web Service resources
     ################################################################################
     WebServiceLambda: ${file(config/functions/web-service.yml):WebServiceLambda}
+    ############ Lambda Functions ######################
+    BlueYonderQuote: ${file(config/lambdafunctions/BlueYonderQuote.yml):BlueYonderQuoteLambda}
+    BlueYonderRequest: ${file(config/lambdafunctions/BlueYonderRequest.yml):BlueYonderRequestLambda}
+    BlueYonderResponse: ${file(config/lambdafunctions/BlueYonderResponse.yml):BlueYonderResponseLambda}
+    E2OpenBasicAuth: ${file(config/lambdafunctions/E2OpenBasicAuth.yml):E2OpenBasicAuthLambda}
+    E2OpenNewShipper: ${file(config/lambdafunctions/E2OpenNewShipper.yml):E2OpenNewShipperLambda}
+    E2OpenRequest: ${file(config/lambdafunctions/E2OpenRequest.yml):E2OpenRequestLambda}
+    E2OpenSpot: ${file(config/lambdafunctions/E2OpenSpot.yml):E2OpenSpotLambda}
+    FormsWebhook: ${file(config/lambdafunctions/FormsWebhook.yml):FormsWebhookLambda}
+    GetWebACL: ${file(config/lambdafunctions/GetWebACL.yml):GetWebACLName}
+    S2QRequest: ${file(config/lambdafunctions/S2QRequest.yml):S2QRequestLambda}
+    WebService: ${file(config/lambdafunctions/WebService.yml):WebServiceLambda}
 
 resources:
     Resources:
+        
+        ################################################################################
+        # Secure passwords and keys for transfers
+        ################################################################################
+        PricingAlgoGreenscreensPassword:
+            Type: AWS::Serverless::Application
+            Properties:
+            Location:
+                ApplicationId: arn:${AWS::Partition}:serverlessrepo:${AWS::Region}:${AWS::AccountId}:applications/binxio-cfn-secret-provider
+                SemanticVersion: 1.0.0
+            Parameters:
+                Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                KeyAlias: alias/aws/ssm
+
+        PricingAlgoDATPassword:
+            Type: AWS::Serverless::Application
+            Properties:
+            Location:
+                ApplicationId: arn:${AWS::Partition}:serverlessrepo:${AWS::Region}:${AWS::AccountId}:applications/binxio-cfn-secret-provider
+                SemanticVersion: 1.0.0
+            Parameters:
+                Name: !Sub /app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                KeyAlias: alias/aws/ssm
+
+
+        ################################################################################
+        # Resources for LogGroups
+        ################################################################################
+        BlueYonderResponseLogGroup: ${config/cloud-watch/BlueYonderResponseLogGroup.yml}
+        BlueYonderRequestLogGroup: ${config/cloud-watch/BlueYonderRequestLogGroup.yml}
+        BlueYonderQuoteLogGroup: ${config/cloud-watch/BlueYonderQuoteLogGroup.yml}
+
         ################################################################################
         # Resources for CloudWatch alarms & dashboards
         ################################################################################

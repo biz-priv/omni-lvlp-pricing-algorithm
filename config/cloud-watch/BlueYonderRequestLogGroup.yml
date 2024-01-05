@@ -1,0 +1,5 @@
+  BlueYonderRequestLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/${self:service}-BlueYonderRequest
+      RetentionInDays: 7

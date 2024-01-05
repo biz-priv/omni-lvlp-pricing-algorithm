@@ -1,0 +1,27 @@
+S2QRequestLambda:
+  name: ${self:service}-S2QRequest-${self:provider.stage}
+  description: S2Q quote request
+  handler: pricing-algorithm/s2q/index.lambda_handler
+  role:  S2QRequestExecutionRole
+  timeout: 60
+  runtime: python3.9
+  memorySize: 500
+  events:
+    - http:
+        path: s2q
+        method: post
+        integration: lambda
+        cors: true
+  environment:
+      APPLICATION: ${self:custom.application}
+      ENVIRONMENT: ${self:provider.stage}
+      IMMUTABLE_ARCHIVE: ${self:custom.application}-${self:provider.stage}-${self:service}-PricingAlgoArchive
+      GREENSCREENS_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/greenscreens-secret
+      DAT_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/dat-secret
+      GOOGLE_API_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/google-api-secret
+  tags:
+    Application: ${self:custom.application}
+    Environment: ${self:provider.stage}
+    DeployableUnitName: ${self:service}
+    GitHubBranch: ${self:custom.GitHubBranch}
+    TechnicalContact: ${self:custom.TechnicalContact}

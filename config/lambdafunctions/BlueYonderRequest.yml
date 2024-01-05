@@ -1,0 +1,36 @@
+BlueYonderRequestLambda:
+  name: ${self:service}-BlueYonderRequest-${self:provider.stage}
+  description: Response to Blue Yonder request for quote
+  handler: pricing-algorithm/blueyonder/blueyonderrequest/index.lambda_handler
+  role: BlueYonderRequestExecutionRole
+  logGroup: BlueYonderRequestLogGroup
+  timeout: 60
+  runtime: python3.9
+  memorySize: 500
+  events:
+    - http:
+        path: blueyonder/blueyonderrequest
+        method: post
+        intergration: lambda
+        cors: true
+  environment:
+      APPLICATION: ${self:custom.application}
+      ENVIRONMENT: ${self:provider.stage}
+      PRICING_ALGO_DB_TABLE: PricingAlgoDynamoDBTable
+      IMMUTABLE_ARCHIVE: ${self:custom.application}-${self:provider.stage}-${self:service}-PricingAlgoArchive
+      GREENSCREENS_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/greenscreens-secret
+      DAT_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/dat-secret
+      GOOGLE_API_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/google-api-secret
+      FUEL_API_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/fuel-api-secret
+      BLUE_YONDER_SECRETS: /app/${self:custom.application}/${self:provider.stage}/${self:service}/blue-yonder-secrets
+      REDSHIFT_HOST: redshift_host
+      REDSHIFT_PORT: redshift_port
+      REDSHIFT_DATABASE: redshift_database
+      REDSHIFT_USERNAME: redshift_username
+      REDSHIFT_PASSWORD: redshift_password
+  tags:
+    Application: ${self:custom.application}
+    Environment: ${self:provider.stage}
+    DeployableUnitName: ${self:service}
+    GitHubBranch: ${self:custom.GitHubBranch}
+    TechnicalContact: ${self:custom.TechnicalContact}

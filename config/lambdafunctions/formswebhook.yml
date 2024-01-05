@@ -1,0 +1,28 @@
+FormsWebhookLambda:
+  name: ${self:service}-WebService-${self:provider.stage}
+  description: Formstack Webhook Pricing Algorithm
+  handler: index.lambda_handler
+  role: FormsWebhookExecutionRole
+  timeout: 60
+  runtime: python3.9
+  events:
+    - http:
+        path: formswebhook
+        method: post
+        intergration: lambda
+        cors: true
+  environment:
+      APPLICATION: ${self:custom.application}
+      ENVIRONMENT: ${self:provider.stage}
+      PRICING_ALGO_DB_TABLE: PricingAlgoDynamoDBTable
+      IMMUTABLE_ARCHIVE: ${self:custom.application}-${self:provider.stage}-${self:service}-PricingAlgoArchive
+      GREENSCREENS_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/greenscreens-secret
+      DAT_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/dat-secret
+      GOOGLE_API_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/google-api-secret
+      FUEL_API_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/fuel-api-secret
+  tags:
+    Application: ${self:custom.application}
+    Environment: ${self:provider.stage}
+    DeployableUnitName: ${self:service}
+    GitHubBranch: ${self:custom.GitHubBranch}
+    TechnicalContact: ${self:custom.TechnicalContact}

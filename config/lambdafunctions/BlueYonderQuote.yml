@@ -1,0 +1,51 @@
+BlueYonderQuoteLambda:
+  name: ${self:service}-BlueYonderQuote-${self:provider.stage}
+  description: Blue Yonder Pricing Algorithm
+  handler: pricing-algorithm/blueyonder/blueyonderquote/index.lambda_handler
+  role: BlueYonderQuoteExecutionRole
+  logGroup: BlueYonderQuoteLogGroup
+  timeout: 60
+  runtime: python3.9
+  memorySize: 500
+  events:
+    - http:
+        path: blueyonder/blueyonderquote
+        method: post
+        intergration: lambda
+        cors: true
+    - stream:
+        type: dynamodb
+        arn:
+          Fn::GetAtt:
+            - PricingAlgoDynamoDBTable
+            - StreamArn
+        batchSize: 1
+        startingPosition: TRIM_HORIZON
+        enabled: true
+        maximumRetryAttempts: 0
+        filterPolicy:
+          NewImage:
+            NewQuote:
+              S:
+                - 'Yes'
+  environment:
+      APPLICATION: ${self:custom.application}
+      ENVIRONMENT: ${self:provider.stage}
+      PRICING_ALGO_DB_TABLE: PricingAlgoDynamoDBTable
+      IMMUTABLE_ARCHIVE: ${self:custom.application}-${self:provider.stage}-${self:service}-PricingAlgoArchive
+      GREENSCREENS_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/greenscreens-secret
+      DAT_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/dat-secret
+      GOOGLE_API_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/google-api-secret
+      FUEL_API_SECRET: /app/${self:custom.application}/${self:provider.stage}/${self:service}/fuel-api-secret
+      BLUE_YONDER_SECRETS: /app/${self:custom.application}/${self:provider.stage}/${self:service}/blue-yonder-secrets
+      REDSHIFT_HOST: redshift_host
+      REDSHIFT_PORT: redshift_port
+      REDSHIFT_DATABASE: redshift_database
+      REDSHIFT_USERNAME: redshift_username
+      REDSHIFT_PASSWORD: redshift_password
+  tags:
+    Application: ${self:custom.application}
+    Environment: ${self:provider.stage}
+    DeployableUnitName: ${self:service}
+    GitHubBranch: ${self:custom.GitHubBranch}
+    TechnicalContact: ${self:custom.TechnicalContact}

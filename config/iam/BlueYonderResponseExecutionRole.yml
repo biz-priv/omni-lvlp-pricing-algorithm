@@ -1,0 +1,94 @@
+  BlueYonderResponseExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Action: sts:AssumeRole
+          Principal:
+            Service: lambda.amazonaws.com
+      Path: /
+      Policies:
+        - PolicyName: cwl-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt BlueYonderResponseLogGroup.Arn
+        - PolicyName: s3-archive-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                - Fn::Transform:
+                    Name: String
+                    Parameters:
+                      InputString: !Sub arn:${AWS::Partition}:s3:::${Application}-${Environment}-${DeployableUnitName}-PricingAlgoArchive/*
+                      Operation: Lower
+        - PolicyName: ssm-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:GetParameters
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/dat-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/greenscreens-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/google-api-secret
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/fuel-api-secret
+        - PolicyName: ssm-put-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ssm:PutParameter
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/app/${Application}/${Environment}/${DeployableUnitName}/blue-yonder-secrets
+        - PolicyName: ses-access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              Effect: Allow
+              Action:
+                - ses:SendEmail
+              Resource:
+                - !Sub arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:identity/omnilogistics.com
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:GetRecords
+                - dynamodb:GetShardIterator
+                - dynamodb:DescribeStream
+                - dynamodb:ListStreams
+              Resource: 
+                - !GetAtt PricingAlgoDynamoDBTable.Arn
+                - !GetAtt PricingAlgoDynamoDBTable.StreamArn
+      Tags:
+        - Key: Application
+          Value: !Ref Application
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: DeployableUnitName
+          Value: !Ref DeployableUnitName
+        - Key: GitHubBranch
+          Value: !Ref GitHubBranch
+        - Key: Technical Contact
+          Value: !Ref TechnicalContact
