@@ -1,3 +1,10 @@
+"""
+* File: pricing-algorithm\libs\update_item_dynamodb.py
+* Project: Omni-lvlp-pricing-algorithm
+* Author: Bizcloud Experts
+* Date: 2023-12-27
+* Confidential and Proprietary
+"""
 import boto3
 import json
 from decimal import Decimal

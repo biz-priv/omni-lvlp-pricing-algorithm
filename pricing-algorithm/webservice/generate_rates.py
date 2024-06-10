@@ -1,3 +1,10 @@
+"""
+* File: pricing-algorithm\webservice\generate_rates.py
+* Project: Omni-lvlp-pricing-algorithm
+* Author: Bizcloud Experts
+* Date: 2023-12-27
+* Confidential and Proprietary
+"""
 import imaplib
 import requests
 import email

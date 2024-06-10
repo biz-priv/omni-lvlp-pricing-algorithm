@@ -1,3 +1,10 @@
+"""
+* File: pricing-algorithm\e2open\basicauth\index.py
+* Project: Omni-lvlp-pricing-algorithm
+* Author: Bizcloud Experts
+* Date: 2023-12-27
+* Confidential and Proprietary
+"""
 import base64
 import os
 import json

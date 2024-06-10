@@ -1,3 +1,10 @@
+"""
+* File: pricing-algorithm\blueyonder\blueyonderquote\index.py
+* Project: Omni-lvlp-pricing-algorithm
+* Author: Bizcloud Experts
+* Date: 2023-12-27
+* Confidential and Proprietary
+"""
 from by_quoting import blue_yonder
 import json
 import decimal

@@ -1,3 +1,10 @@
+"""
+* File: pricing-algorithm\formswebhook\formstack_webhook_parsing.py
+* Project: Omni-lvlp-pricing-algorithm
+* Author: Bizcloud Experts
+* Date: 2023-12-27
+* Confidential and Proprietary
+"""
 import imaplib
 import email
 import json

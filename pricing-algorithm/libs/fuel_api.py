@@ -1,3 +1,10 @@
+"""
+* File: pricing-algorithm\libs\fuel_api.py
+* Project: Omni-lvlp-pricing-algorithm
+* Author: Bizcloud Experts
+* Date: 2023-12-27
+* Confidential and Proprietary
+"""
 import requests
 import json
 import os

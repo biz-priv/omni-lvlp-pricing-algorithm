@@ -1,3 +1,10 @@
+"""
+* File: pricing-algorithm\e2open\spot\e2open_spot_market.py
+* Project: Omni-lvlp-pricing-algorithm
+* Author: Bizcloud Experts
+* Date: 2023-12-27
+* Confidential and Proprietary
+"""
 import requests
 import json
 from pytz import timezone
